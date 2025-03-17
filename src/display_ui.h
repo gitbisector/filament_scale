@@ -57,13 +57,13 @@ public:
             // Show vessel name
             display.setFont(u8g2_font_7x14B_tr);
             display.drawStr(0, y, vessel->name);
-            y += 8;
+            y += 2;
 
             // Separator line
             for (int i = 0; i < 128; i += 2) {
                 display.drawPixel(i, y);
             }
-            y += 14;
+            y += 20;
 
             // Show total weight in large font
             display.setFont(u8g2_font_logisoso16_tr);
@@ -189,13 +189,13 @@ private:
         int y = 14;
         
         display.drawStr(0, y, "Select Vessel:");
-        y += 6;
+        y += 3;
 
         // Separator line
         for (int i = 0; i < 128; i += 2) {
             display.drawPixel(i, y);
         }
-        y += 10;
+        y += 13;
         
         VesselConfig* vessel = vesselManager.getVessel(selectedVessel);
         if (vessel) {

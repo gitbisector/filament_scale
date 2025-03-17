@@ -54,13 +54,27 @@ function connectWebSocket() {
             clearInterval(reconnectInterval);
             reconnectInterval = null;
         }
-        // Request vessel list on connection
-        ws.send(JSON.stringify({ command: 'getVessels' }));
-        // Restore updates state if it was enabled
-        if (updatesEnabled) {
-            console.log('Restoring updates state:', updatesEnabled);
-            ws.send(JSON.stringify({ command: 'toggleUpdates', enabled: updatesEnabled }));
-        }
+        // Small delay to ensure server is ready
+        setTimeout(() => {
+            // Request vessel list on connection
+            console.log('Requesting vessel list');
+            try {
+                ws.send(JSON.stringify({ command: 'getVessels' }));
+            } catch (e) {
+                console.error('Failed to request vessel list:', e);
+                statusDisplay.textContent = 'Failed to load vessels';
+                statusDisplay.style.color = '#e74c3c';
+            }
+            // Restore updates state if it was enabled
+            if (updatesEnabled) {
+                console.log('Restoring updates state:', updatesEnabled);
+                try {
+                    ws.send(JSON.stringify({ command: 'toggleUpdates', enabled: updatesEnabled }));
+                } catch (e) {
+                    console.error('Failed to restore updates state:', e);
+                }
+            }
+        }, 500); // 500ms delay
     };
     
     ws.onclose = () => {
