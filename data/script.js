@@ -1,53 +1,257 @@
-let weightElement = document.getElementById('weight');
-let statusElement = document.getElementById('status');
-let tareButton = document.getElementById('tare');
-let calibrateButton = document.getElementById('calibrate');
+// DOM Elements
+const weightDisplay = document.getElementById('weight');
+const statusDisplay = document.getElementById('status');
+const tareButton = document.getElementById('tare');
+const calibrateButton = document.getElementById('calibrate');
+const toggleUpdatesButton = document.getElementById('toggle-updates');
+const vesselsList = document.getElementById('vessels-list');
+const addVesselButton = document.getElementById('add-vessel');
+const vesselModal = document.getElementById('vessel-modal');
+const vesselForm = document.getElementById('vessel-form');
+const modalClose = document.getElementById('modal-close');
+const modalTitle = document.getElementById('modal-title');
+
+// Debug check for elements
+console.log('Elements found:', {
+    weightDisplay: !!weightDisplay,
+    statusDisplay: !!statusDisplay,
+    tareButton: !!tareButton,
+    calibrateButton: !!calibrateButton,
+    toggleUpdatesButton: !!toggleUpdatesButton,
+    vesselsList: !!vesselsList,
+    addVesselButton: !!addVesselButton,
+    vesselModal: !!vesselModal,
+    vesselForm: !!vesselForm,
+    modalClose: !!modalClose
+});
 
 // WebSocket connection
 let ws = null;
-const connectWebSocket = () => {
-    ws = new WebSocket(`ws://${window.location.hostname}/ws`);
+let reconnectInterval = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const INITIAL_RECONNECT_DELAY = 2000;
+let currentReconnectDelay = INITIAL_RECONNECT_DELAY;
+let updatesEnabled = false;
+const wsUrl = `ws://${window.location.hostname}/ws`;
+
+function connectWebSocket() {
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+        return;
+    }
+    
+    ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
-        statusElement.textContent = 'Connected';
-        statusElement.style.color = '#27ae60';
+        console.log('WebSocket connected');
+        statusDisplay.textContent = 'Connected';
+        statusDisplay.style.color = '#27ae60';
+        reconnectAttempts = 0;
+        currentReconnectDelay = INITIAL_RECONNECT_DELAY;
+        if (reconnectInterval) {
+            clearInterval(reconnectInterval);
+            reconnectInterval = null;
+        }
+        // Request vessel list on connection
+        ws.send(JSON.stringify({ command: 'getVessels' }));
+        // Restore updates state if it was enabled
+        if (updatesEnabled) {
+            console.log('Restoring updates state:', updatesEnabled);
+            ws.send(JSON.stringify({ command: 'toggleUpdates', enabled: updatesEnabled }));
+        }
     };
-
+    
     ws.onclose = () => {
-        statusElement.textContent = 'Disconnected - Reconnecting...';
-        statusElement.style.color = '#e74c3c';
-        setTimeout(connectWebSocket, 2000);
+        console.log('WebSocket disconnected');
+        statusDisplay.textContent = 'Disconnected - Reconnecting...';
+        statusDisplay.style.color = '#e74c3c';
+        
+        if (!reconnectInterval) {
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectInterval = setTimeout(() => {
+                    reconnectInterval = null;
+                    reconnectAttempts++;
+                    currentReconnectDelay *= 1.5; // Exponential backoff
+                    connectWebSocket();
+                }, currentReconnectDelay);
+                console.log(`Reconnecting in ${currentReconnectDelay}ms (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+            } else {
+                statusDisplay.textContent = 'Connection failed - Please refresh page';
+                console.log('Max reconnection attempts reached');
+            }
+        }
     };
-
+    
     ws.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
-            if (data.weight !== undefined) {
-                weightElement.textContent = data.weight.toFixed(2);
+            console.log('Received message:', data);
+            
+            if (data.weight !== undefined && updatesEnabled) {
+                weightDisplay.textContent = data.weight.toFixed(2);
             }
+            
+            if (data.vessels) {
+                updateVesselsList(data.vessels);
+            }
+            
             if (data.status) {
-                statusElement.textContent = data.status;
+                statusDisplay.textContent = data.status;
+                console.log('Status update:', data.status);
+                // Refresh vessel list after successful operations
+                if (data.status.includes('Vessel')) {
+                    ws.send(JSON.stringify({ command: 'getVessels' }));
+                }
             }
         } catch (e) {
             console.error('Error parsing message:', e);
         }
     };
-};
+    
+    ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        statusDisplay.textContent = 'Connection error';
+        statusDisplay.style.color = '#e74c3c';
+    };
+}
 
-// Button handlers
+// Toggle real-time updates
+toggleUpdatesButton.addEventListener('click', () => {
+    updatesEnabled = !updatesEnabled;
+    console.log('Toggling updates:', updatesEnabled);
+    
+    toggleUpdatesButton.textContent = updatesEnabled ? 'Stop Updates' : 'Start Updates';
+    toggleUpdatesButton.classList.toggle('active', updatesEnabled);
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        const message = { command: 'toggleUpdates', enabled: updatesEnabled };
+        console.log('Sending toggle message:', message);
+        ws.send(JSON.stringify(message));
+    }
+});
+
+// Vessel List Management
+function updateVesselsList(vessels) {
+    console.log('Updating vessels list:', vessels);
+    vesselsList.innerHTML = '';
+    vessels.forEach((vessel, index) => {
+        const vesselElement = document.createElement('div');
+        vesselElement.className = 'vessel-item';
+        
+        const lastUpdate = new Date(vessel.lastUpdate).toLocaleString();
+        vesselElement.innerHTML = `
+            <div class="vessel-info">
+                <h3>${vessel.name}</h3>
+                <p>Vessel: ${vessel.vesselWeight}g | Spool: ${vessel.spoolWeight}g</p>
+                <p>Last Weight: ${vessel.lastWeight}g (${lastUpdate})</p>
+            </div>
+            <div class="vessel-actions">
+                <button onclick="editVessel(${index})" class="button">Edit</button>
+                <button onclick="deleteVessel(${index})" class="button">Delete</button>
+            </div>
+        `;
+        vesselsList.appendChild(vesselElement);
+    });
+}
+
+// Modal Management
+function showModal(isEdit = false, vesselData = null) {
+    console.log('Showing modal:', { isEdit, vesselData });
+    modalTitle.textContent = isEdit ? 'Edit Vessel' : 'Add Vessel';
+    vesselForm.reset();
+    document.getElementById('vessel-index').value = isEdit ? vesselData.index : '';
+    document.getElementById('vessel-name').value = isEdit ? vesselData.name : '';
+    document.getElementById('vessel-weight').value = isEdit ? vesselData.vesselWeight : '';
+    document.getElementById('spool-weight').value = isEdit ? vesselData.spoolWeight : '';
+    vesselModal.style.display = 'block';
+}
+
+function hideModal() {
+    console.log('Hiding modal');
+    vesselModal.style.display = 'none';
+}
+
+// Vessel CRUD Operations
+function editVessel(index) {
+    console.log('Editing vessel:', index);
+    const vesselElement = vesselsList.children[index];
+    const name = vesselElement.querySelector('h3').textContent;
+    const weights = vesselElement.querySelector('p').textContent.match(/\d+(\.\d+)?/g);
+    
+    showModal(true, {
+        index,
+        name,
+        vesselWeight: parseFloat(weights[0]),
+        spoolWeight: parseFloat(weights[1])
+    });
+}
+
+function deleteVessel(index) {
+    console.log('Deleting vessel:', index);
+    if (confirm('Are you sure you want to delete this vessel?')) {
+        ws.send(JSON.stringify({
+            command: 'deleteVessel',
+            index
+        }));
+    }
+}
+
+// Event Listeners
 tareButton.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ command: 'tare' }));
-        statusElement.textContent = 'Taring...';
+        statusDisplay.textContent = 'Taring...';
     }
 });
 
 calibrateButton.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ command: 'calibrate' }));
-        statusElement.textContent = 'Calibrating...';
+        const weight = prompt('Enter calibration weight in grams:', '100');
+        if (weight) {
+            ws.send(JSON.stringify({
+                command: 'calibrate',
+                weight: parseFloat(weight)
+            }));
+        }
     }
 });
 
-// Initial connection
+// Make these functions globally accessible
+window.editVessel = editVessel;
+window.deleteVessel = deleteVessel;
+
+// Add vessel button click handler
+addVesselButton.addEventListener('click', () => {
+    console.log('Add vessel button clicked');
+    showModal(false);
+});
+
+// Modal close button handler
+modalClose.addEventListener('click', hideModal);
+
+// Vessel form submit handler
+vesselForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    console.log('Form submitted');
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        const index = document.getElementById('vessel-index').value;
+        const data = {
+            command: index ? 'updateVessel' : 'addVessel',
+            name: document.getElementById('vessel-name').value,
+            vesselWeight: parseFloat(document.getElementById('vessel-weight').value),
+            spoolWeight: parseFloat(document.getElementById('spool-weight').value)
+        };
+        
+        if (index) {
+            data.index = parseInt(index);
+        }
+        
+        console.log('Sending vessel data:', data);
+        ws.send(JSON.stringify(data));
+        hideModal();
+    }
+});
+
+// Initialize WebSocket connection
 connectWebSocket();

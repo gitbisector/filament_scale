@@ -12,7 +12,6 @@ enum MenuState {
 
 #define ttype U8G2_SSD1306_128X64_NONAME_F_HW_I2C
 
-
 class DisplayUI {
 public:
     DisplayUI() 
@@ -20,14 +19,15 @@ public:
         menuState = MAIN_SCREEN;
         selectedVessel = 0;
         calibrationStep = 0;
+        wifiStatus[0] = '\0';
     }
     
     void init() {
         display.begin();
         display.clearBuffer();
-        display.setFont(u8g2_font_7x14B_tr); // Set a font, adjust as needed.
-        display.setContrast(255); 
-        display.drawStr(0, 10, "Total: ");
+        display.setFont(u8g2_font_7x14B_tr);
+        display.setContrast(255);
+        display.drawStr(0, 14, "Initializing...");
         display.sendBuffer();
     }
     
@@ -36,15 +36,29 @@ public:
         
         display.clearBuffer();
         char buf[32];
+
+        // Show WiFi status if it's set
+        if (wifiStatus[0] != '\0') {
+            display.drawStr(0, 14, wifiStatus);
+            if (strstr(wifiStatus, "Connected") != nullptr) {
+                sprintf(buf, "IP: %s", ipAddress);
+                display.drawStr(0, 28, buf);
+            }
+            display.sendBuffer();
+            return;
+        }
+        
+        // Show normal weight display
         if (vessel) {
-            display.drawStr(0, 10, vessel->name);
+            display.drawStr(0, 14, vessel->name);
             display.drawStr(0, 20, "----------------");
             sprintf(buf, "Total: %.1f", weight);
-            display.drawStr(0, 40, buf);
+            display.drawStr(0, 30, buf);
             sprintf(buf, "Filament: %.1f", weight - vessel->vesselWeight - vessel->spoolWeight);
-            display.drawStr(0, 50, buf);
+            display.drawStr(0, 44, buf);
         } else {
-            display.drawStr(0, 15, "No vessel selected");
+            display.drawStr(0, 14, "No vessel selected");
+            display.drawStr(0, 20, "----------------");
             sprintf(buf, "Weight: %.1f", weight);
             display.drawStr(0, 30, buf);
         }
@@ -77,6 +91,7 @@ public:
             case VESSEL_SELECT:
                 if (vesselManager.getVessel(selectedVessel)) {
                     menuState = MAIN_SCREEN;
+                    showWeight(0.0, vesselManager.getVessel(selectedVessel)); // Show selected vessel immediately
                 }
                 break;
                 
@@ -102,31 +117,54 @@ public:
         }
     }
     
+    void setWiFiStatus(const char* status, const char* ip = nullptr) {
+        strncpy(wifiStatus, status, sizeof(wifiStatus) - 1);
+        wifiStatus[sizeof(wifiStatus) - 1] = '\0';
+        
+        if (ip) {
+            strncpy(ipAddress, ip, sizeof(ipAddress) - 1);
+            ipAddress[sizeof(ipAddress) - 1] = '\0';
+        } else {
+            ipAddress[0] = '\0';
+        }
+    }
+    
+    void clearWiFiStatus() {
+        wifiStatus[0] = '\0';
+        ipAddress[0] = '\0';
+    }
+
+    // Add getter methods
+    MenuState getMenuState() const { return menuState; }
+    int getSelectedVessel() const { return selectedVessel; }
+
 private:
     ttype display;
     MenuState menuState;
     int selectedVessel;
     int calibrationStep;
+    char wifiStatus[32];
+    char ipAddress[16];
     
     // Updated to use drawStr consistently instead of Print methods.
     void showVesselSelection() {
         display.clearBuffer();
-        int y = 10; // starting y offset
+        int y = 14; // starting y offset
         
         display.drawStr(0, y, "Select Vessel:");
-        y += 10;
+        y += 6;
         display.drawStr(0, y, "----------------");
-        y += 12;
+        y += 10;
         
         VesselConfig* vessel = vesselManager.getVessel(selectedVessel);
         if (vessel) {
             display.drawStr(0, y, vessel->name);
-            y += 10;
+            y += 14;
             
             char buf[32];
             sprintf(buf, "Vessel: %.1f", vessel->vesselWeight);
             display.drawStr(0, y, buf);
-            y += 10;
+            y += 14;
             
             sprintf(buf, "Spool: %.1f", vessel->spoolWeight);
             display.drawStr(0, y, buf);

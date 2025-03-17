@@ -9,28 +9,33 @@
 #include "config.h"
 #include "vessel_manager.h"
 #include "display_ui.h"
+#include <AsyncWebSocket.h>
+#include "wifi_credentials.h"
 
-// Function prototype for setupWebServer
 void setupWebServer();
 
 HX711 scale;
 VesselManager vesselManager;
 DisplayUI *display;
 AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+Preferences preferences;
 
 volatile bool rotaryInterrupt = false;
 volatile int rotaryDirection = 0;
 volatile bool buttonPressed = false;
 
-#define BUTTON_DEBOUNCE_DELAY 250  // debounce period in milliseconds
+#define BUTTON_DEBOUNCE_DELAY 250
 volatile unsigned long lastButtonPressTime = 0;
 
-// Interrupt handlers for rotary encoder
+bool calibrationMode = false;
+float knownWeight = 100.0;
+
 void IRAM_ATTR rotaryISR_cw() {
     unsigned long currentTime = millis();
     if(!digitalRead(ROTARY_PIN_RIGHT) && (currentTime - lastButtonPressTime > BUTTON_DEBOUNCE_DELAY)) {
+        rotaryDirection = 1;
         rotaryInterrupt = true;
-        rotaryDirection = -1;
     }
     lastButtonPressTime = currentTime;
 }
@@ -38,12 +43,11 @@ void IRAM_ATTR rotaryISR_cw() {
 void IRAM_ATTR rotaryISR_ccw() {
     unsigned long currentTime = millis();
     if(!digitalRead(ROTARY_PIN_LEFT) && (currentTime - lastButtonPressTime > BUTTON_DEBOUNCE_DELAY)) {
+        rotaryDirection = -1;
         rotaryInterrupt = true;
-        rotaryDirection = 1;
     }
     lastButtonPressTime = currentTime;
 }
-
 
 void IRAM_ATTR buttonISR() {
     unsigned long currentTime = millis();
@@ -53,161 +57,272 @@ void IRAM_ATTR buttonISR() {
     lastButtonPressTime = currentTime;
 }
 
+struct WSClient {
+    uint32_t id;
+    bool updatesEnabled;
+};
+
+#define MAX_CLIENTS 10
+WSClient wsClients[MAX_CLIENTS];
+int numClients = 0;
+
+WSClient* findClient(uint32_t id) {
+    for (int i = 0; i < numClients; i++) {
+        if (wsClients[i].id == id) {
+            return &wsClients[i];
+        }
+    }
+    if (numClients < MAX_CLIENTS) {
+        wsClients[numClients].id = id;
+        wsClients[numClients].updatesEnabled = false;
+        return &wsClients[numClients++];
+    }
+    return nullptr;
+}
+
+void removeClient(uint32_t id) {
+    for (int i = 0; i < numClients; i++) {
+        if (wsClients[i].id == id) {
+            for (int j = i; j < numClients - 1; j++) {
+                wsClients[j] = wsClients[j + 1];
+            }
+            numClients--;
+            return;
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     Wire.begin(I2C_SDA, I2C_SCL);
-    
-    // Initialize SPIFFS
+
     if(!SPIFFS.begin(true)) {
         Serial.println("SPIFFS Mount Failed");
         return;
     }
-    
-    // Initialize HX711
+
+    display = new DisplayUI();
+    display->init();
+
+#ifdef WIFI_SSID
+    WiFi.mode(WIFI_STA);
+
+#ifdef USE_STATIC_IP
+    IPAddress local_ip;
+    IPAddress gateway;
+    IPAddress subnet;
+    IPAddress dns1;
+    IPAddress dns2;
+
+    local_ip.fromString(STATIC_IP);
+    gateway.fromString(STATIC_GATEWAY);
+    subnet.fromString(STATIC_SUBNET);
+    dns1.fromString(STATIC_DNS1);
+    dns2.fromString(STATIC_DNS2);
+
+    if (!WiFi.config(local_ip, gateway, subnet, dns1, dns2)) {
+        Serial.println("Failed to configure static IP");
+    }
+#endif
+
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        delay(500);
+        Serial.print(".");
+        char buf[32];
+        sprintf(buf, "Connecting %d/20", attempts + 1);
+        display->setWiFiStatus(buf);
+        display->showWeight(0.0, nullptr);
+        attempts++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\nConnected to WiFi");
+        Serial.print("IP address: ");
+        Serial.println(WiFi.localIP());
+        display->setWiFiStatus("Connected", WiFi.localIP().toString().c_str());
+        display->showWeight(0.0, nullptr);
+        delay(2000);
+        display->clearWiFiStatus();
+    } else {
+        Serial.println("\nFailed to connect to WiFi");
+        display->setWiFiStatus("Connection Failed");
+        display->showWeight(0.0, nullptr);
+        delay(3000);
+        ESP.restart();
+    }
+#else
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS);
+    Serial.print("AP IP address: ");
+    Serial.println(WiFi.softAPIP());
+    display->setWiFiStatus("AP Mode", WiFi.softAPIP().toString().c_str());
+#endif
+
     scale.begin(HX711_DATA_PIN, HX711_CLOCK_PIN);
-    scale.set_scale(258.14); // Use calibration value here
+    preferences.begin("scale", false);
+    float scaleFactor = preferences.getFloat("factor", 1.0f);
+    preferences.end();
+    scale.set_scale(scaleFactor);
     scale.tare();
-    
-    
-    // Setup rotary encoder
+
     pinMode(ROTARY_PIN_LEFT, INPUT_PULLUP);
     pinMode(ROTARY_PIN_RIGHT, INPUT_PULLUP);
     pinMode(ROTARY_PIN_BUTTON, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(ROTARY_PIN_LEFT), rotaryISR_ccw, CHANGE);
     attachInterrupt(digitalPinToInterrupt(ROTARY_PIN_RIGHT), rotaryISR_cw, CHANGE);
     attachInterrupt(digitalPinToInterrupt(ROTARY_PIN_BUTTON), buttonISR, CHANGE);
-    
-    // Setup WiFi Access Point
-    WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS);
-    Serial.print("AP IP address: ");
-    Serial.println(WiFi.softAPIP());
-    
-    // Setup web server routes
+
     setupWebServer();
-    // Initialize display
-    display  = new DisplayUI();
-    display->init();
+    server.begin();
 }
 
 void loop() {
     static unsigned long lastUpdate = 0;
-    static VesselConfig* currentVessel = vesselManager.getVessel(0);
-    
-    // Handle rotary encoder
-    if (rotaryInterrupt) {
-        if(rotaryDirection > 0)
-            Serial.print("CW ");
-        else
-            Serial.print("CCW ");
-        Serial.println("Rotary");
+    static VesselConfig* currentVessel = nullptr;
 
+    if (rotaryInterrupt) {
+        if(rotaryDirection > 0) {
+            Serial.print("CW ");
+        } else {
+            Serial.print("CCW ");
+        }
+        Serial.println("Rotary");
         display->handleRotary(rotaryDirection);
         rotaryInterrupt = false;
     }
-    
+
     if (buttonPressed) {
         Serial.println("Button");
         display->handleButton();
+        if (display->getMenuState() == MAIN_SCREEN) {
+            currentVessel = vesselManager.getVessel(display->getSelectedVessel());
+        }
         buttonPressed = false;
     }
-    
-    // Update weight reading every 100ms
+
     if (millis() - lastUpdate > 200) {
         float weight = scale.get_units();
         Serial.print("Weight: ");
-        Serial.println(weight);        
+        Serial.println(weight);
         display->showWeight(weight, currentVessel);
         lastUpdate = millis();
+    }
+
+    static unsigned long lastWebSocketUpdate = 0;
+    if (millis() - lastWebSocketUpdate > 200) {
+        if (ws.count() > 0) {
+            float weight = scale.get_units();
+            String json = "{\"weight\":" + String(weight, 2) + "}";
+            for(int i = 0; i < numClients; i++) {
+                if(wsClients[i].updatesEnabled) {
+                    AsyncWebSocketClient * client = ws.client(wsClients[i].id);
+                    if(client) client->text(json);
+                }
+            }
+        }
+        lastWebSocketUpdate = millis();
+    }
+}
+
+void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *data, size_t len) {
+    AwsFrameInfo *info = (AwsFrameInfo*)arg;
+    if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+        StaticJsonDocument<200> doc;
+        DeserializationError error = deserializeJson(doc, data, len);
+        if (!error) {
+            const char* command = doc["command"];
+
+            if (strcmp(command, "toggleUpdates") == 0) {
+                WSClient* wsClient = findClient(client->id());
+                if (wsClient) {
+                    wsClient->updatesEnabled = doc["enabled"];
+                    String response = "{\"status\":\"Updates " + String(wsClient->updatesEnabled ? "enabled" : "disabled") + "\"}";
+                    client->text(response);
+                }
+                return;
+            }
+
+            if (strcmp(command, "tare") == 0) {
+                scale.tare();
+                ws.textAll("{\"status\":\"Scale tared\"}");
+            } else if (strcmp(command, "calibrate") == 0) {
+                if (doc.containsKey("weight")) {
+                    knownWeight = doc["weight"];
+                    calibrationMode = true;
+                    scale.set_scale(1.0f);
+                    ws.textAll("{\"status\":\"Place " + String(knownWeight, 1) + "g weight and wait\"}");
+                } else if (calibrationMode) {
+                    float measured = scale.get_units();
+                    if (measured != 0) {
+                        float scaleFactor = measured / knownWeight;
+                        scale.set_scale(scaleFactor);
+                        preferences.begin("scale", false);
+                        preferences.putFloat("factor", scaleFactor);
+                        preferences.end();
+                        calibrationMode = false;
+                        ws.textAll("{\"status\":\"Calibration complete\",\"factor\":" + String(scaleFactor, 4) + "}");
+                    } else {
+                        ws.textAll("{\"status\":\"Error: No weight detected\"}");
+                    }
+                }
+            } else if (strcmp(command, "getVessels") == 0) {
+                StaticJsonDocument<1024> response;
+                JsonArray vessels = response.createNestedArray("vessels");
+                for(int i = 0; i < vesselManager.getVesselCount(); i++) {
+                    VesselConfig* vessel = vesselManager.getVessel(i);
+                    if(vessel) {
+                        JsonObject v = vessels.createNestedObject();
+                        v["name"] = vessel->name;
+                        v["vesselWeight"] = vessel->vesselWeight;
+                        v["spoolWeight"] = vessel->spoolWeight;
+                    }
+                }
+                String jsonString;
+                serializeJson(response, jsonString);
+                client->text(jsonString);
+            } else if (strcmp(command, "addVessel") == 0) {
+                const char* name = doc["name"] | "";
+                float vesselWeight = doc["vesselWeight"] | 0.0f;
+                float spoolWeight = doc["spoolWeight"] | 0.0f;
+                if (strlen(name) > 0) {
+                    if (vesselManager.addVessel(name, vesselWeight, spoolWeight)) {
+                        client->text("{\"status\":\"Vessel added successfully\"}");
+                    } else {
+                        client->text("{\"status\":\"Error: Failed to add vessel\"}");
+                    }
+                } else {
+                    client->text("{\"status\":\"Error: Invalid vessel name\"}");
+                }
+            }
+        }
+    }
+}
+
+void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
+                     void *arg, uint8_t *data, size_t len) {
+    switch (type) {
+        case WS_EVT_CONNECT:
+            Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+            findClient(client->id());
+            break;
+        case WS_EVT_DISCONNECT:
+            Serial.printf("WebSocket client #%u disconnected\n", client->id());
+            removeClient(client->id());
+            break;
+        case WS_EVT_DATA:
+            handleWebSocketMessage(client, arg, data, len);
+            break;
+        case WS_EVT_PONG:
+        case WS_EVT_ERROR:
+            break;
     }
 }
 
 void setupWebServer() {
-    // Serve static files
     server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
-    
-    // API endpoints
-    server.on("/api/vessels", HTTP_GET, [](AsyncWebServerRequest *request) {
-        AsyncResponseStream *response = request->beginResponseStream("application/json");
-        DynamicJsonDocument doc(1024);
-        JsonArray array = doc.to<JsonArray>();
-        
-        for (int i = 0; i < vesselManager.getVesselCount(); i++) {
-            VesselConfig* vessel = vesselManager.getVessel(i);
-            if (vessel) {
-                JsonObject obj = array.createNestedObject();
-                obj["id"] = i;
-                obj["name"] = vessel->name;
-                obj["vesselWeight"] = vessel->vesselWeight;
-                obj["spoolWeight"] = vessel->spoolWeight;
-                obj["lastWeight"] = vessel->lastWeight;
-                obj["lastUpdate"] = vessel->lastUpdate;
-            }
-        }
-        
-        serializeJson(doc, *response);
-        request->send(response);
-    });
-    
-    // Add new vessel
-    AsyncCallbackJsonWebHandler* handler = new AsyncCallbackJsonWebHandler("/api/vessels", [](AsyncWebServerRequest *request, JsonVariant &json) {
-        JsonObject jsonObj = json.as<JsonObject>();
-        
-        if (jsonObj.containsKey("name") && 
-            jsonObj.containsKey("vesselWeight") && 
-            jsonObj.containsKey("spoolWeight")) {
-            
-            const char* name = jsonObj["name"];
-            float vesselWeight = jsonObj["vesselWeight"];
-            float spoolWeight = jsonObj["spoolWeight"];
-            
-            bool success = vesselManager.addVessel(name, vesselWeight, spoolWeight);
-            
-            if (success) {
-                request->send(200, "application/json", "{\"status\":\"success\"}");
-            } else {
-                request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Failed to add vessel\"}");
-            }
-        } else {
-            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing required fields\"}");
-        }
-    });
-    server.addHandler(handler);
-    
-    // Update vessel
-    server.on("/api/vessels/{id}", HTTP_PUT, [](AsyncWebServerRequest *request) {
-        if (request->hasParam("id")) {
-            int id = request->getParam("id")->value().toInt();
-            // Handle vessel update
-            request->send(200, "application/json", "{\"status\":\"success\"}");
-        } else {
-            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing vessel ID\"}");
-        }
-    });
-    
-    // Delete vessel
-    server.on("/api/vessels/{id}", HTTP_DELETE, [](AsyncWebServerRequest *request) {
-        if (request->hasParam("id")) {
-            int id = request->getParam("id")->value().toInt();
-            bool success = vesselManager.deleteVessel(id);
-            if (success) {
-                request->send(200, "application/json", "{\"status\":\"success\"}");
-            } else {
-                request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Failed to delete vessel\"}");
-            }
-        } else {
-            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing vessel ID\"}");
-        }
-    });
-    
-    // Get current weight
-    server.on("/api/weight", HTTP_GET, [](AsyncWebServerRequest *request) {
-        float weight = scale.get_units();
-        AsyncResponseStream *response = request->beginResponseStream("application/json");
-        DynamicJsonDocument doc(128);
-        doc["weight"] = weight;
-        serializeJson(doc, *response);
-        request->send(response);
-    });
-    
-    server.begin();
+    ws.onEvent(onWebSocketEvent);
+    server.addHandler(&ws);
 }

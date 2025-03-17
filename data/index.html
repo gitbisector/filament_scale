@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Filament Scale</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,9 +17,54 @@
         <div class="controls">
             <button id="tare" class="button">Tare</button>
             <button id="calibrate" class="button">Calibrate</button>
+            <button id="toggle-updates" class="button">Start Updates</button>
         </div>
         <div class="status" id="status"></div>
+
+        <div class="vessels-section">
+            <h2>Vessels</h2>
+            <div class="vessels-list" id="vessels-list"></div>
+            <button id="add-vessel" class="button">Add Vessel</button>
+        </div>
+
+        <!-- Add/Edit Vessel Modal -->
+        <div id="vessel-modal" class="modal">
+            <div class="modal-content">
+                <h3 id="modal-title">Add Vessel</h3>
+                <form id="vessel-form" onsubmit="return false;">
+                    <input type="hidden" id="vessel-index">
+                    <div class="form-group">
+                        <label for="vessel-name">Name:</label>
+                        <input type="text" id="vessel-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="vessel-weight">Vessel Weight (g):</label>
+                        <input type="number" id="vessel-weight" step="0.01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="spool-weight">Spool Weight (g):</label>
+                        <input type="number" id="spool-weight" step="0.01" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="button">Save</button>
+                        <button type="button" class="button" id="modal-close">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
+
+    <script>
+        // Ensure modal can be closed by clicking outside
+        document.addEventListener('DOMContentLoaded', function() {
+            const modal = document.getElementById('vessel-modal');
+            window.addEventListener('click', function(event) {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            });
+        });
+    </script>
     <script src="script.js"></script>
 </body>
 </html>

@@ -1,78 +1,195 @@
+:root {
+    --primary-color: #2196F3;
+    --danger-color: #f44336;
+    --success-color: #4CAF50;
+    --text-color: #333;
+    --background-color: #f5f5f5;
+    --card-background: #fff;
+}
+
 * {
+    box-sizing: border-box;
     margin: 0;
     padding: 0;
-    box-sizing: border-box;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #f0f2f5;
-    color: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     line-height: 1.6;
+    background-color: var(--background-color);
+    color: var(--text-color);
 }
 
 .container {
-    max-width: 600px;
-    margin: 2rem auto;
-    padding: 2rem;
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
 }
 
-h1 {
+h1, h2 {
     text-align: center;
-    margin-bottom: 2rem;
-    color: #2c3e50;
+    margin-bottom: 20px;
 }
 
 .weight-display {
-    text-align: center;
-    padding: 2rem;
-    margin: 1rem 0;
-    background: #f8f9fa;
+    background-color: var(--card-background);
     border-radius: 8px;
-    display: flex;
-    justify-content: center;
-    align-items: baseline;
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .weight-value {
-    font-size: 3rem;
+    font-size: 3em;
     font-weight: bold;
-    color: #2c3e50;
+    color: var(--primary-color);
 }
 
 .weight-unit {
-    font-size: 1.5rem;
+    font-size: 1.5em;
     color: #666;
-    margin-left: 0.5rem;
 }
 
 .controls {
     display: flex;
-    gap: 1rem;
+    gap: 10px;
     justify-content: center;
-    margin: 2rem 0;
+    margin-bottom: 20px;
 }
 
 .button {
-    padding: 0.8rem 1.5rem;
-    font-size: 1rem;
+    padding: 10px 20px;
+    margin: 5px;
     border: none;
-    border-radius: 6px;
-    background: #3498db;
+    border-radius: 4px;
+    background-color: #3498db;
     color: white;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background-color 0.3s;
 }
 
 .button:hover {
-    background: #2980b9;
+    background-color: #2980b9;
+}
+
+.button.active {
+    background-color: #e74c3c;
+}
+
+.button.active:hover {
+    background-color: #c0392b;
 }
 
 .status {
     text-align: center;
+    margin-bottom: 20px;
+    color: var(--text-color);
+}
+
+/* Vessel Management Styles */
+.vessels-section {
+    margin-top: 30px;
+}
+
+.vessels-list {
+    display: grid;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.vessel-item {
+    background-color: var(--card-background);
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.vessel-info h3 {
+    margin: 0;
+    color: var(--primary-color);
+}
+
+.vessel-info p {
+    margin: 5px 0;
     color: #666;
-    min-height: 1.5rem;
+}
+
+.vessel-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.vessel-actions .button:last-child {
+    background-color: var(--danger-color);
+}
+
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.5);
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: var(--card-background);
+    border-radius: 8px;
+    padding: 20px;
+    width: 90%;
+    max-width: 500px;
+    margin: 50px auto;
+    position: relative;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+    .vessel-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .vessel-actions {
+        margin-top: 10px;
+        justify-content: flex-end;
+    }
+
+    .weight-value {
+        font-size: 2.5em;
+    }
+
+    .modal-content {
+        width: 95%;
+        margin: 20px auto;
+    }
 }
