@@ -31,7 +31,4 @@ struct VesselConfig {
     char name[32];
     float vesselWeight;
     float spoolWeight;
-    float lastWeight;
-    unsigned long lastUpdate;
 };
-

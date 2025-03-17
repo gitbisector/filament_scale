@@ -3,6 +3,7 @@
 #include "vessel_manager.h"
 
 extern VesselManager vesselManager;
+
 enum MenuState {
     MAIN_SCREEN,
     VESSEL_SELECT,
@@ -20,6 +21,7 @@ public:
         selectedVessel = 0;
         calibrationStep = 0;
         wifiStatus[0] = '\0';
+        ipAddress[0] = '\0';
     }
     
     void init() {
@@ -36,31 +38,53 @@ public:
         
         display.clearBuffer();
         char buf[32];
+        int y = 14;
 
         // Show WiFi status if it's set
         if (wifiStatus[0] != '\0') {
-            display.drawStr(0, 14, wifiStatus);
-            if (strstr(wifiStatus, "Connected") != nullptr) {
+            display.setFont(u8g2_font_7x13_tr);  // Smaller font for status
+            display.drawStr(0, y, wifiStatus);
+            if (ipAddress[0] != '\0') {
                 sprintf(buf, "IP: %s", ipAddress);
-                display.drawStr(0, 28, buf);
+                y += 13;
+                display.drawStr(0, y, buf);
             }
-            display.sendBuffer();
-            return;
+            y += 13;
         }
-        
+
         // Show normal weight display
         if (vessel) {
-            display.drawStr(0, 14, vessel->name);
-            display.drawStr(0, 20, "----------------");
-            sprintf(buf, "Total: %.1f", weight);
-            display.drawStr(0, 30, buf);
-            sprintf(buf, "Filament: %.1f", weight - vessel->vesselWeight - vessel->spoolWeight);
-            display.drawStr(0, 44, buf);
+            // Show vessel name
+            display.setFont(u8g2_font_7x14B_tr);
+            display.drawStr(0, y, vessel->name);
+            y += 8;
+
+            // Separator line
+            for (int i = 0; i < 128; i += 2) {
+                display.drawPixel(i, y);
+            }
+            y += 14;
+
+            // Show total weight in large font
+            display.setFont(u8g2_font_logisoso16_tr);
+            sprintf(buf, "%.1fg", weight);
+            display.drawStr(0, y, buf);
+            y += 20;
+
+            // Show filament weight
+            display.setFont(u8g2_font_7x14_tr);
+            float filamentWeight = weight - vessel->vesselWeight - vessel->spoolWeight;
+            sprintf(buf, "Filament: %.1fg", filamentWeight);
+            display.drawStr(0, y, buf);
         } else {
-            display.drawStr(0, 14, "No vessel selected");
-            display.drawStr(0, 20, "----------------");
-            sprintf(buf, "Weight: %.1f", weight);
-            display.drawStr(0, 30, buf);
+            // No vessel selected, show simple weight
+            display.setFont(u8g2_font_logisoso16_tr);
+            sprintf(buf, "%.1fg", weight);
+            int strwidth = display.getStrWidth(buf);
+            display.drawStr((128 - strwidth) / 2, 40, buf);  // Center the weight
+
+            display.setFont(u8g2_font_7x14_tr);
+            display.drawStr(0, 60, "No vessel selected");
         }
         display.sendBuffer();
     }
@@ -99,6 +123,7 @@ public:
                 if (calibrationStep == 0) {
                     // Save empty vessel weight
                     calibrationStep++;
+                    showCalibration(0.0, "Vessel");
                 } else {
                     menuState = MAIN_SCREEN;
                     calibrationStep = 0;
@@ -109,6 +134,7 @@ public:
                 if (calibrationStep == 0) {
                     // Save empty spool weight
                     calibrationStep++;
+                    showCalibration(0.0, "Spool");
                 } else {
                     menuState = MAIN_SCREEN;
                     calibrationStep = 0;
@@ -120,13 +146,21 @@ public:
     void setWiFiStatus(const char* status, const char* ip = nullptr) {
         strncpy(wifiStatus, status, sizeof(wifiStatus) - 1);
         wifiStatus[sizeof(wifiStatus) - 1] = '\0';
-        
         if (ip) {
             strncpy(ipAddress, ip, sizeof(ipAddress) - 1);
             ipAddress[sizeof(ipAddress) - 1] = '\0';
         } else {
             ipAddress[0] = '\0';
         }
+        display.clearBuffer();
+        display.setFont(u8g2_font_7x14_tr);
+        display.drawStr(0, 14, wifiStatus);
+        if (ipAddress[0] != '\0') {
+            char buf[32];
+            sprintf(buf, "IP: %s", ipAddress);
+            display.drawStr(0, 28, buf);
+        }
+        display.sendBuffer();
     }
     
     void clearWiFiStatus() {
@@ -134,26 +168,33 @@ public:
         ipAddress[0] = '\0';
     }
 
-    // Add getter methods
     MenuState getMenuState() const { return menuState; }
     int getSelectedVessel() const { return selectedVessel; }
 
+    void setSelectedVessel(int index) {
+        if (index >= 0 && index < vesselManager.getVesselCount()) {
+            selectedVessel = index;
+            menuState = MAIN_SCREEN;
+            VesselConfig* vessel = vesselManager.getVessel(selectedVessel);
+            if (vessel) {
+                showWeight(0.0, vessel);
+            }
+        }
+    }
+
 private:
-    ttype display;
-    MenuState menuState;
-    int selectedVessel;
-    int calibrationStep;
-    char wifiStatus[32];
-    char ipAddress[16];
-    
-    // Updated to use drawStr consistently instead of Print methods.
     void showVesselSelection() {
         display.clearBuffer();
-        int y = 14; // starting y offset
+        display.setFont(u8g2_font_7x14B_tr);
+        int y = 14;
         
         display.drawStr(0, y, "Select Vessel:");
         y += 6;
-        display.drawStr(0, y, "----------------");
+
+        // Separator line
+        for (int i = 0; i < 128; i += 2) {
+            display.drawPixel(i, y);
+        }
         y += 10;
         
         VesselConfig* vessel = vesselManager.getVessel(selectedVessel);
@@ -162,34 +203,48 @@ private:
             y += 14;
             
             char buf[32];
-            sprintf(buf, "Vessel: %.1f", vessel->vesselWeight);
+            display.setFont(u8g2_font_7x14_tr);
+            sprintf(buf, "Vessel: %.1fg", vessel->vesselWeight);
             display.drawStr(0, y, buf);
             y += 14;
             
-            sprintf(buf, "Spool: %.1f", vessel->spoolWeight);
+            sprintf(buf, "Spool: %.1fg", vessel->spoolWeight);
             display.drawStr(0, y, buf);
         }
         display.sendBuffer();
     }
     
-    // Updated calibration screen using drawStr.
     void showCalibration(float weight, const char* type) {
         display.clearBuffer();
-        int y = 10;
-        char buf[32];
+        display.setFont(u8g2_font_7x14B_tr);
+        int y = 14;
         
+        char buf[32];
         sprintf(buf, "Calibrating %s", type);
         display.drawStr(0, y, buf);
+        y += 6;
+        
+        // Separator line
+        for (int i = 0; i < 128; i += 2) {
+            display.drawPixel(i, y);
+        }
         y += 12;
         
-        display.drawStr(0, y, "----------------");
-        y += 12;
+        display.setFont(u8g2_font_logisoso16_tr);
+        sprintf(buf, "%.1fg", weight);
+        int strwidth = display.getStrWidth(buf);
+        display.drawStr((128 - strwidth) / 2, y, buf);  // Center the weight
+        y += 20;
         
-        sprintf(buf, "Weight: %.1f", weight);
-        display.drawStr(0, y, buf);
-        y += 12;
-        
+        display.setFont(u8g2_font_7x14_tr);
         display.drawStr(0, y, "Press to save");
         display.sendBuffer();
     }
+
+    ttype display;
+    MenuState menuState;
+    int selectedVessel;
+    int calibrationStep;
+    char wifiStatus[32];
+    char ipAddress[32];
 };
