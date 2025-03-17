@@ -121,6 +121,10 @@ function connectWebSocket() {
             
             if (data.vessels) {
                 updateVesselsList(data.vessels);
+                // Update selected vessel if provided
+                if (data.selectedVessel !== undefined) {
+                    updateSelectedVessel(data.selectedVessel);
+                }
             }
             
             if (data.status) {
@@ -161,6 +165,9 @@ toggleUpdatesButton.addEventListener('click', () => {
 // Vessel List Management
 function updateVesselsList(vessels) {
     console.log('Updating vessels list:', vessels);
+    // Store current selection to restore it after updating list
+    const selectedVessel = vesselsList.querySelector('.vessel-item.selected');
+    const selectedIndex = selectedVessel ? Array.from(vesselsList.children).indexOf(selectedVessel) : -1;
     vesselsList.innerHTML = '';
     vessels.forEach((vessel, index) => {
         const vesselElement = document.createElement('div');
@@ -196,6 +203,8 @@ function updateSelectedVessel(index) {
 
 function selectVessel(index) {
     console.log('Selecting vessel:', index);
+    // Update UI immediately for better responsiveness
+    updateSelectedVessel(index);
     ws.send(JSON.stringify({
         command: 'selectVessel',
         index: index

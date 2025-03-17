@@ -2,7 +2,7 @@
 #include <U8g2lib.h>
 #include "vessel_manager.h"
 
-extern VesselManager vesselManager;
+extern VesselManager* vesselManager;
 
 enum MenuState {
     MAIN_SCREEN,
@@ -18,7 +18,7 @@ public:
     DisplayUI() 
     : display(ttype(U8G2_R2, /* reset=*/ U8X8_PIN_NONE, I2C_SCL, I2C_SDA)) {
         menuState = MAIN_SCREEN;
-        selectedVessel = 0;
+        selectedVessel = vesselManager->getSelectedVessel();
         calibrationStep = 0;
         wifiStatus[0] = '\0';
         ipAddress[0] = '\0';
@@ -90,11 +90,14 @@ public:
     }
     
     void handleRotary(int direction) {
+        int newSelection;
         switch(menuState) {
             case VESSEL_SELECT:
-                selectedVessel += direction;
-                if (selectedVessel < 0) selectedVessel = vesselManager.getVesselCount() - 1;
-                if (selectedVessel >= vesselManager.getVesselCount()) selectedVessel = 0;
+                newSelection = selectedVessel + direction;
+                if (newSelection < 0) newSelection = vesselManager->getVesselCount() - 1;
+                if (newSelection >= vesselManager->getVesselCount()) newSelection = 0;
+                selectedVessel = newSelection;
+                vesselManager->setSelectedVessel(selectedVessel);
                 showVesselSelection();
                 break;
                 
@@ -113,9 +116,10 @@ public:
                 break;
                 
             case VESSEL_SELECT:
-                if (vesselManager.getVessel(selectedVessel)) {
+                if (vesselManager->getVessel(selectedVessel)) {
                     menuState = MAIN_SCREEN;
-                    showWeight(0.0, vesselManager.getVessel(selectedVessel)); // Show selected vessel immediately
+                    vesselManager->setSelectedVessel(selectedVessel); // Persist selection
+                    showWeight(0.0, vesselManager->getVessel(selectedVessel)); // Show selected vessel immediately
                 }
                 break;
                 
@@ -172,10 +176,11 @@ public:
     int getSelectedVessel() const { return selectedVessel; }
 
     void setSelectedVessel(int index) {
-        if (index >= 0 && index < vesselManager.getVesselCount()) {
+        if (index >= 0 && index < vesselManager->getVesselCount()) {
             selectedVessel = index;
+            vesselManager->setSelectedVessel(index);
             menuState = MAIN_SCREEN;
-            VesselConfig* vessel = vesselManager.getVessel(selectedVessel);
+            VesselConfig* vessel = vesselManager->getVessel(selectedVessel);
             if (vessel) {
                 showWeight(0.0, vessel);
             }
@@ -197,7 +202,7 @@ private:
         }
         y += 13;
         
-        VesselConfig* vessel = vesselManager.getVessel(selectedVessel);
+        VesselConfig* vessel = vesselManager->getVessel(selectedVessel);
         if (vessel) {
             display.drawStr(0, y, vessel->name);
             y += 14;

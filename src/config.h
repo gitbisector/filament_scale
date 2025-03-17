@@ -1,9 +1,9 @@
 #pragma once
 
 // Pin Definitions
-#define ROTARY_PIN_LEFT      0  // D0 - Left
-#define ROTARY_PIN_BUTTON    1  // D1 - Push
-#define ROTARY_PIN_RIGHT     2  // D2 - Right
+#define ROTARY_PIN_RIGHT    0  // D0 - Left
+#define ROTARY_PIN_BUTTON   1  // D1 - Push
+#define ROTARY_PIN_LEFT     2  // D2 - Right
 
 // HX711 pins
 #define HX711_DATA_PIN   19

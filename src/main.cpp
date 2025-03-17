@@ -15,7 +15,7 @@
 void setupWebServer();
 
 HX711 scale;
-VesselManager vesselManager;
+VesselManager* vesselManager;
 DisplayUI *display;
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
@@ -174,6 +174,9 @@ void setup() {
         return;
     }
 
+    // Initialize vessel manager first so preferences are ready
+    vesselManager = new VesselManager();
+    // Initialize display with vessel manager
     display = new DisplayUI();
     display->init();
 
@@ -271,15 +274,18 @@ void loop() {
         Serial.println("Button");
         display->handleButton();
         if (display->getMenuState() == MAIN_SCREEN) {
-            currentVessel = vesselManager.getVessel(display->getSelectedVessel());
+            currentVessel = vesselManager->getVessel(display->getSelectedVessel());
         }
         buttonPressed = false;
     }
 
     if (millis() - lastUpdate > 200) {
+        // Always ensure we have the current vessel
+        if (display->getMenuState() == MAIN_SCREEN) {
+            currentVessel = vesselManager->getVessel(display->getSelectedVessel());
+        }
+
         float weight = scale.get_units();
-        Serial.print("Weight: ");
-        Serial.println(weight);
         display->showWeight(weight, currentVessel);
         lastUpdate = millis();
     }
@@ -293,7 +299,7 @@ void loop() {
 
             if (display->getMenuState() == MAIN_SCREEN) {
                 selectedIndex = display->getSelectedVessel();
-                currentVessel = vesselManager.getVessel(selectedIndex);
+                currentVessel = vesselManager->getVessel(selectedIndex);
             }
 
             StaticJsonDocument<200> doc;
@@ -353,7 +359,7 @@ void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *da
 
         if (strcmp(command, "selectVessel") == 0) {
             int index = doc["index"] | -1;
-            if (index >= 0 && index < vesselManager.getVesselCount()) {
+            if (index >= 0 && index < vesselManager->getVesselCount()) {
                 display->setSelectedVessel(index);
                 StaticJsonDocument<200> response;
                 response["status"] = "Vessel selected";
@@ -374,7 +380,7 @@ void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *da
                 float vesselWeight = vessel["vesselWeight"];
                 float spoolWeight = vessel["spoolWeight"];
                 
-                if (vesselManager.addVessel(name, vesselWeight, spoolWeight)) {
+                if (vesselManager->addVessel(name, vesselWeight, spoolWeight)) {
                     broadcastStatus("Vessel added");
                     sendVesselList();  // Update all clients
                 } else {
@@ -392,7 +398,7 @@ void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *da
                 float vesselWeight = vessel["vesselWeight"];
                 float spoolWeight = vessel["spoolWeight"];
                 
-                if (vesselManager.updateVessel(index, name, vesselWeight, spoolWeight)) {
+                if (vesselManager->updateVessel(index, name, vesselWeight, spoolWeight)) {
                     broadcastStatus("Vessel updated");
                     sendVesselList();  // Update all clients
                 } else {
@@ -404,7 +410,7 @@ void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *da
 
         if (strcmp(command, "deleteVessel") == 0) {
             int index = doc["index"] | -1;
-            if (index >= 0 && vesselManager.deleteVessel(index)) {
+            if (index >= 0 && vesselManager->deleteVessel(index)) {
                 broadcastStatus("Vessel deleted");
                 sendVesselList();  // Update all clients
             } else {
@@ -447,8 +453,8 @@ void sendVesselList() {
     StaticJsonDocument<1024> doc;
     JsonArray vessels = doc.createNestedArray("vessels");
     
-    for (int i = 0; i < vesselManager.getVesselCount(); i++) {
-        VesselConfig* vessel = vesselManager.getVessel(i);
+    for (int i = 0; i < vesselManager->getVesselCount(); i++) {
+        VesselConfig* vessel = vesselManager->getVessel(i);
         if (vessel) {
             JsonObject v = vessels.createNestedObject();
             v["name"] = vessel->name;
@@ -457,6 +463,8 @@ void sendVesselList() {
         }
     }
     
+    // Include the selected vessel index
+    doc["selectedVessel"] = vesselManager->getSelectedVessel();
     String json;
     serializeJson(doc, json);
     ws.textAll(json);
