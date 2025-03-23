@@ -206,14 +206,15 @@ public:
     void handleQuickAddButton() {
         switch(quickAddStep) {
             case 0: // Empty vessel weight
-                quickAddWeight = scale->getWeight();
+                // Round to one decimal place
+                quickAddWeight = roundf(scale->getWeight() * 10.0f) / 10.0f;
                 quickAddStep++;
                 showQuickAdd(quickAddWeight);
                 break;
             case 1: // With full spool
-                float fullWeight = scale->getWeight();
+                float fullWeight = roundf(scale->getWeight() * 10.0f) / 10.0f;
                 float vesselWeight = quickAddWeight;
-                float spoolWeight = fullWeight - vesselWeight - 1000.0f;
+                float spoolWeight = roundf((fullWeight - vesselWeight - 1000.0f) * 10.0f) / 10.0f;
                 // Generate a default name
                 int vesselNum = vesselManager->getVesselCount() + 1;
                 snprintf(tempVesselName, sizeof(tempVesselName), "Vessel %d", vesselNum);
