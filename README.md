@@ -20,7 +20,7 @@ A smart 3D printer filament scale built with the Seeed XIAO ESP32-C6. Keep track
 - Load cell (rated for your expected weight range)
 - SSD1306 128x64 OLED display (I2C)
 - Rotary encoder with push button
-- 3D printed case and platform (STL files coming soon)
+- 3D printed case and platform ([STL files on Printables](https://www.printables.com/model/402495-filament-scale))
 
 ## Software Requirements
 
