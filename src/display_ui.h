@@ -1,25 +1,33 @@
 #pragma once
 #include <U8g2lib.h>
 #include "vessel_manager.h"
+#include "scale.h"
 
 extern VesselManager* vesselManager;
+extern Scale* scale;
 
 enum MenuState {
     MAIN_SCREEN,
     VESSEL_SELECT,
     CALIBRATION_VESSEL,
-    CALIBRATION_SPOOL
+    CALIBRATION_SPOOL,
+    QUICK_ADD_VESSEL
 };
 
 #define ttype U8G2_SSD1306_128X64_NONAME_F_HW_I2C
 
 class DisplayUI {
+private:
+    float quickAddWeight = 0.0f;
+    int quickAddStep = 0;
+    char tempVesselName[32];
 public:
     DisplayUI() 
     : display(ttype(U8G2_R2, /* reset=*/ U8X8_PIN_NONE, I2C_SCL, I2C_SDA)) {
         menuState = MAIN_SCREEN;
         selectedVessel = vesselManager->getSelectedVessel();
         calibrationStep = 0;
+        quickAddStep = 0;
         wifiStatus[0] = '\0';
         ipAddress[0] = '\0';
     }
@@ -93,11 +101,14 @@ public:
         int newSelection;
         switch(menuState) {
             case VESSEL_SELECT:
+                // Allow -1 for "Quick Add" option
                 newSelection = selectedVessel + direction;
-                if (newSelection < 0) newSelection = vesselManager->getVesselCount() - 1;
-                if (newSelection >= vesselManager->getVesselCount()) newSelection = 0;
+                if (newSelection < -1) newSelection = vesselManager->getVesselCount() - 1;
+                if (newSelection >= vesselManager->getVesselCount()) newSelection = -1;
                 selectedVessel = newSelection;
-                vesselManager->setSelectedVessel(selectedVessel);
+                if (selectedVessel >= 0) {
+                    vesselManager->setSelectedVessel(selectedVessel);
+                }
                 showVesselSelection();
                 break;
                 
@@ -114,15 +125,21 @@ public:
                 menuState = VESSEL_SELECT;
                 showVesselSelection();
                 break;
-                
             case VESSEL_SELECT:
-                if (vesselManager->getVessel(selectedVessel)) {
+                if (selectedVessel == -1) {
+                    // No vessel selected, enter quick add mode
+                    menuState = QUICK_ADD_VESSEL;
+                    quickAddStep = 0;
+                    showQuickAdd(0);
+                } else if (vesselManager->getVessel(selectedVessel)) {
                     menuState = MAIN_SCREEN;
                     vesselManager->setSelectedVessel(selectedVessel); // Persist selection
                     showWeight(0.0, vesselManager->getVessel(selectedVessel)); // Show selected vessel immediately
                 }
                 break;
-                
+            case QUICK_ADD_VESSEL:
+                handleQuickAddButton();
+                break;
             case CALIBRATION_VESSEL:
                 if (calibrationStep == 0) {
                     // Save empty vessel weight
@@ -133,7 +150,6 @@ public:
                     calibrationStep = 0;
                 }
                 break;
-                
             case CALIBRATION_SPOOL:
                 if (calibrationStep == 0) {
                     // Save empty spool weight
@@ -187,12 +203,68 @@ public:
         }
     }
 
+    void handleQuickAddButton() {
+        switch(quickAddStep) {
+            case 0: // Empty vessel weight
+                quickAddWeight = scale->getWeight();
+                quickAddStep++;
+                showQuickAdd(quickAddWeight);
+                break;
+            case 1: // With full spool
+                float fullWeight = scale->getWeight();
+                float vesselWeight = quickAddWeight;
+                float spoolWeight = fullWeight - vesselWeight - 1000.0f;
+                // Generate a default name
+                int vesselNum = vesselManager->getVesselCount() + 1;
+                snprintf(tempVesselName, sizeof(tempVesselName), "Vessel %d", vesselNum);
+                if (vesselManager->addVessel(tempVesselName, vesselWeight, spoolWeight)) {
+                    selectedVessel = vesselManager->getVesselCount() - 1;
+                    vesselManager->setSelectedVessel(selectedVessel);
+                    menuState = MAIN_SCREEN;
+                    showWeight(0.0, vesselManager->getVessel(selectedVessel));
+                } else {
+                    menuState = MAIN_SCREEN;
+                    showWeight(0.0, nullptr);
+                }
+                break;
+        }
+    }
+
+    void showQuickAdd(float weight) {
+        display.clearBuffer();
+        display.setFont(u8g2_font_7x14B_tr);
+        char buf[32];
+        int y = 14;
+        if (quickAddStep == 0) {
+            display.drawStr(0, y, "Quick Add Vessel");
+            y += 20;
+            display.setFont(u8g2_font_7x14_tr);
+            display.drawStr(0, y, "Place empty vessel");
+            y += 20;
+            display.drawStr(0, y, "Press button when");
+            y += 15;
+            display.drawStr(0, y, "ready");
+        } else {
+            display.drawStr(0, y, "Add 1KG Spool");
+            y += 20;
+            display.setFont(u8g2_font_7x14_tr);
+            sprintf(buf, "Vessel: %.1fg", weight);
+            display.drawStr(0, y, buf);
+            y += 20;
+            display.drawStr(0, y, "Add full spool &");
+            y += 15;
+            display.drawStr(0, y, "press button");
+        }
+
+        display.sendBuffer();
+    }
+
 private:
     void showVesselSelection() {
         display.clearBuffer();
         display.setFont(u8g2_font_7x14B_tr);
         int y = 14;
-        
+
         display.drawStr(0, y, "Select Vessel:");
         y += 3;
 
@@ -201,20 +273,24 @@ private:
             display.drawPixel(i, y);
         }
         y += 13;
-        
-        VesselConfig* vessel = vesselManager->getVessel(selectedVessel);
-        if (vessel) {
-            display.drawStr(0, y, vessel->name);
-            y += 14;
-            
-            char buf[32];
-            display.setFont(u8g2_font_7x14_tr);
-            sprintf(buf, "Vessel: %.1fg", vessel->vesselWeight);
-            display.drawStr(0, y, buf);
-            y += 14;
-            
-            sprintf(buf, "Spool: %.1fg", vessel->spoolWeight);
-            display.drawStr(0, y, buf);
+
+        if (selectedVessel == -1) {
+            display.drawStr(0, y, "[Quick Add Vessel]");
+        } else {
+            VesselConfig* vessel = vesselManager->getVessel(selectedVessel);
+            if (vessel) {
+                display.drawStr(0, y, vessel->name);
+                y += 14;
+
+                char buf[32];
+                display.setFont(u8g2_font_7x14_tr);
+                sprintf(buf, "Vessel: %.1fg", vessel->vesselWeight);
+                display.drawStr(0, y, buf);
+                y += 14;
+
+                sprintf(buf, "Spool: %.1fg", vessel->spoolWeight);
+                display.drawStr(0, y, buf);
+            }
         }
         display.sendBuffer();
     }

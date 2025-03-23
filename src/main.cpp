@@ -3,18 +3,18 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncJson.h>
 #include <ArduinoJson.h>
-#include <HX711.h>
 #include <Wire.h>
 #include <SPIFFS.h>
 #include "config.h"
 #include "vessel_manager.h"
 #include "display_ui.h"
+#include "scale.h"
 #include <AsyncWebSocket.h>
 #include "wifi_credentials.h"
 
 void setupWebServer();
 
-HX711 scale;
+Scale* scale;
 VesselManager* vesselManager;
 DisplayUI *display;
 AsyncWebServer server(80);
@@ -120,48 +120,48 @@ bool calibrateScale(float knownWeight) {
     }
 
     // First tare the scale
-    scale.tare(20);  // Use 20 readings for better accuracy
-    delay(1000);     // Give time for stability
-    
-    // Get multiple readings and check for stability
-    long readings[5];
+    scale->tare();
+    delay(1000);  // Give time for stability
+
+    // Take multiple readings
+    float readings[5];
     for (int i = 0; i < 5; i++) {
-        readings[i] = scale.read_average(10);
+        readings[i] = scale->getWeight();
         delay(100);
     }
-    
+
     // Check readings stability
-    long avgReading = 0;
-    long maxDiff = 0;
+    float avgReading = 0;
+    float maxDiff = 0;
     for (int i = 0; i < 5; i++) {
         avgReading += readings[i];
         for (int j = i + 1; j < 5; j++) {
-            long diff = abs(readings[i] - readings[j]);
+            float diff = abs(readings[i] - readings[j]);
             if (diff > maxDiff) maxDiff = diff;
         }
     }
     avgReading /= 5;
-    
+
     // If readings are unstable (more than 1% variation), return false
     if (maxDiff > (avgReading * 0.01)) {
         return false;
     }
-    
+
     // Calculate and set scale factor
-    float scaleFactor = (float)avgReading / knownWeight;
+    float scaleFactor = avgReading / knownWeight;
     if (scaleFactor <= 0) {
         return false;
     }
-    
+
     // Set and save the new scale factor
-    scale.set_scale(scaleFactor);
+    scale->setCalibrationFactor(scaleFactor);
     preferences.begin("scale", false);
     preferences.putFloat("factor", scaleFactor);
     preferences.end();
-    
-    Serial.printf("Calibrated scale - Raw: %ld, Weight: %.2f, Factor: %.2f\n", 
+
+    Serial.printf("Calibrated scale - Reading: %.2f, Weight: %.2f, Factor: %.2f\n",
                  avgReading, knownWeight, scaleFactor);
-    
+
     return true;
 }
 
@@ -174,9 +174,14 @@ void setup() {
         return;
     }
 
-    // Initialize vessel manager first so preferences are ready
+    // Initialize scale first
+    scale = new Scale();
+    scale->init();
+
+    // Initialize vessel manager
     vesselManager = new VesselManager();
-    // Initialize display with vessel manager
+
+    // Initialize display
     display = new DisplayUI();
     display->init();
 
@@ -237,12 +242,15 @@ void setup() {
     display->setWiFiStatus("AP Mode", WiFi.softAPIP().toString().c_str());
 #endif
 
-    scale.begin(HX711_DATA_PIN, HX711_CLOCK_PIN);
+    // Load scale calibration
     preferences.begin("scale", false);
     float scaleFactor = preferences.getFloat("factor", 1.0f);
+    float offset = preferences.getFloat("offset", 0.0f);
     preferences.end();
-    scale.set_scale(scaleFactor);
-    scale.tare();
+
+    scale->setCalibrationFactor(scaleFactor);
+    scale->setOffset(offset);
+    scale->tare();
 
     pinMode(ROTARY_PIN_LEFT, INPUT_PULLUP);
     pinMode(ROTARY_PIN_RIGHT, INPUT_PULLUP);
@@ -285,7 +293,7 @@ void loop() {
             currentVessel = vesselManager->getVessel(display->getSelectedVessel());
         }
 
-        float weight = scale.get_units();
+        float weight = scale->getWeight();
         display->showWeight(weight, currentVessel);
         lastUpdate = millis();
     }
@@ -293,7 +301,7 @@ void loop() {
     static unsigned long lastWebSocketUpdate = 0;
     if (millis() - lastWebSocketUpdate > 200) {
         if (ws.count() > 0) {
-            float weight = scale.get_units();
+            float weight = scale->getWeight();
             VesselConfig* currentVessel = nullptr;
             int selectedIndex = -1;
 
@@ -425,7 +433,7 @@ void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *da
         }
 
         if (strcmp(command, "tare") == 0) {
-            scale.tare(20);  // Use 20 readings for better accuracy
+            scale->tare();
             broadcastStatus("Scale tared");
             return;
         }
