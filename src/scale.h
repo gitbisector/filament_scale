@@ -4,7 +4,7 @@
 
 class Scale {
 public:
-    Scale() : calibrationFactor(1.0f), offset(0.0f) {}
+    Scale() : calibrationFactor(1.0f), offset(0.0f), calibrationMargin(0.02f) {}
     
     void init() {
         scale.begin(HX711_DATA_PIN, HX711_CLOCK_PIN);
@@ -14,6 +14,13 @@ public:
     
     float getWeight() {
         return scale.get_units();
+    }
+
+    float getRawValue() {
+        // Get raw reading and subtract offset
+        float raw = scale.read_average(1);  // Use 1 reading to avoid crashes
+        float offset = scale.get_offset();
+        return raw - offset;
     }
     
     void tare() {
@@ -39,8 +46,17 @@ public:
         scale.set_offset(offset);
     }
 
+    void setCalibrationMargin(float margin) {
+        calibrationMargin = margin;
+    }
+
+    float getCalibrationMargin() const {
+        return calibrationMargin;
+    }
+
 private:
     HX711 scale;
     float calibrationFactor;
     float offset;
+    float calibrationMargin;
 };

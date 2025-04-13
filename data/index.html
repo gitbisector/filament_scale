@@ -19,6 +19,15 @@
             <button id="calibrate" class="button">Calibrate</button>
             <button id="toggle-updates" class="button">Start Updates</button>
         </div>
+        <div class="calibration-settings">
+            <h3>Calibration Settings</h3>
+            <div class="form-group">
+                <label for="calibration-margin">Stability Margin (%):</label>
+                <input type="number" id="calibration-margin" min="0.1" max="10" step="0.1" style="width: 80px">
+                <button id="save-margin" class="button">Save</button>
+            </div>
+            <p class="help-text">Higher values allow more variation during calibration.</p>
+        </div>
         <div class="status" id="status"></div>
 
         <div class="vessels-section">
@@ -39,11 +48,11 @@
                     </div>
                     <div class="form-group">
                         <label for="vessel-weight">Vessel Weight (g):</label>
-                        <input type="number" id="vessel-weight" step="0.01" required>
+                        <input type="number" id="vessel-weight" step="0.1" required>
                     </div>
                     <div class="form-group">
                         <label for="spool-weight">Spool Weight (g):</label>
-                        <input type="number" id="spool-weight" step="0.01" required>
+                        <input type="number" id="spool-weight" step="0.1" required>
                     </div>
                     <div class="form-actions">
                         <button type="submit" class="button">Save</button>

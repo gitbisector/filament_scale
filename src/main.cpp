@@ -119,15 +119,15 @@ bool calibrateScale(float knownWeight) {
         return false;
     }
 
-    // First tare the scale
-    scale->tare();
-    delay(1000);  // Give time for stability
+    // Give time for stability after weight is placed
+    delay(1000);
 
-    // Take multiple readings
+    // Take multiple raw readings with longer delays for stability
     float readings[5];
-    for (int i = 0; i < 5; i++) {
-        readings[i] = scale->getWeight();
-        delay(100);
+    for (int i = 0; i 
+        < 5; i++) {
+        readings[i] = scale->getRawValue();
+        delay(500);  // Increased delay between readings
     }
 
     // Check readings stability
@@ -142,24 +142,37 @@ bool calibrateScale(float knownWeight) {
     }
     avgReading /= 5;
 
-    // If readings are unstable (more than 1% variation), return false
-    if (maxDiff > (avgReading * 0.01)) {
+    // If readings are unstable (variation percentage > margin), return false
+    float variationPercent = (maxDiff / avgReading);
+    Serial.printf("Calibration stability: variation %.3f%%, margin %.3f%%, readings: %.2f %.2f %.2f %.2f %.2f\n",
+                 variationPercent * 100, scale->getCalibrationMargin() * 100,
+                 readings[0], readings[1], readings[2], readings[3], readings[4]);
+    if (variationPercent > scale->getCalibrationMargin()) {
         return false;
     }
 
     // Calculate and set scale factor
+    // Scale factor = raw reading / known weight (to convert raw readings to weight)
+    // Note: getRawValue() already subtracts the offset
     float scaleFactor = avgReading / knownWeight;
+    Serial.printf("Calibration data:\n");
+    Serial.printf("  Raw reading (with offset): %.2f\n", avgReading);
+    Serial.printf("  Known weight: %.2f\n", knownWeight);
+    Serial.printf("  Scale factor: %.2f\n", scaleFactor);
+    Serial.printf("  Current offset: %.2f\n", scale->getOffset());
     if (scaleFactor <= 0) {
+        Serial.printf("Invalid scale factor!\n");
         return false;
     }
 
-    // Set and save the new scale factor
+    // Set and save the new scale factor and calibration margin
     scale->setCalibrationFactor(scaleFactor);
     preferences.begin("scale", false);
     preferences.putFloat("factor", scaleFactor);
+    preferences.putFloat("margin", scale->getCalibrationMargin());
     preferences.end();
 
-    Serial.printf("Calibrated scale - Reading: %.2f, Weight: %.2f, Factor: %.2f\n",
+    Serial.printf("Calibrated scale - Raw reading: %.2f, Weight: %.2f, Factor: %.2f\n",
                  avgReading, knownWeight, scaleFactor);
 
     return true;
@@ -246,10 +259,12 @@ void setup() {
     preferences.begin("scale", false);
     float scaleFactor = preferences.getFloat("factor", 1.0f);
     float offset = preferences.getFloat("offset", 0.0f);
+    float margin = preferences.getFloat("margin", 0.02f);
     preferences.end();
 
     scale->setCalibrationFactor(scaleFactor);
     scale->setOffset(offset);
+    scale->setCalibrationMargin(margin);
     scale->tare();
 
     pinMode(ROTARY_PIN_LEFT, INPUT_PULLUP);
@@ -336,6 +351,7 @@ void loop() {
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len);
 void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *data, size_t len);
 void sendVesselList();
+void sendCalibrationSettings();
 
 void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *data, size_t len) {
     AwsFrameInfo *info = (AwsFrameInfo*)arg;
@@ -432,6 +448,11 @@ void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *da
             return;
         }
 
+        if (strcmp(command, "getCalibrationSettings") == 0) {
+            sendCalibrationSettings();
+            return;
+        }
+
         if (strcmp(command, "tare") == 0) {
             scale->tare();
             broadcastStatus("Scale tared");
@@ -441,10 +462,11 @@ void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *da
         if (strcmp(command, "calibrate") == 0) {
             float knownWeight = doc["weight"] | 0.0f;
             if (knownWeight > 0) {
+                // Note: Scale should already be tared with nothing on it before starting calibration
                 if (calibrateScale(knownWeight)) {
-                    broadcastStatus("Scale calibrated successfully");
+                    broadcastStatus("Scale calibrated successfully. Remove calibration weight and tare again if needed.");
                 } else {
-                    broadcastStatus("Calibration failed - unstable readings", true);
+                    broadcastStatus("Calibration failed - unstable readings. Make sure to tare with nothing on the scale BEFORE placing the calibration weight.", true);
                 }
             } else {
                 broadcastStatus("Invalid calibration weight", true);
@@ -452,9 +474,32 @@ void handleWebSocketMessage(AsyncWebSocketClient *client, void *arg, uint8_t *da
             return;
         }
 
+        if (strcmp(command, "setCalibrationMargin") == 0) {
+            float margin = doc["margin"] | 0.02f;
+            if (margin > 0 && margin < 1.0) {
+                scale->setCalibrationMargin(margin);
+                preferences.begin("scale", false);
+                preferences.putFloat("margin", margin);
+                preferences.end();
+                broadcastStatus("Calibration margin updated");
+            } else {
+                broadcastStatus("Invalid calibration margin (must be between 0 and 1)", true);
+            }
+            return;
+        }
+
         Serial.println("Unknown command");
         broadcastStatus("Unknown command", true);
     }
+}
+
+void sendCalibrationSettings() {
+    StaticJsonDocument<256> doc;
+    doc["calibrationFactor"] = scale->getCalibrationFactor();
+    doc["calibrationMargin"] = scale->getCalibrationMargin();
+    String json;
+    serializeJson(doc, json);
+    ws.textAll(json);
 }
 
 void sendVesselList() {

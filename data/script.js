@@ -11,6 +11,8 @@ const vesselModal = document.getElementById('vessel-modal');
 const vesselForm = document.getElementById('vessel-form');
 const modalClose = document.getElementById('modal-close');
 const modalTitle = document.getElementById('modal-title');
+const calibrationMarginInput = document.getElementById('calibration-margin');
+const saveMarginButton = document.getElementById('save-margin');
 
 // Debug check for elements
 console.log('Elements found:', {
@@ -56,13 +58,14 @@ function connectWebSocket() {
         }
         // Small delay to ensure server is ready
         setTimeout(() => {
-            // Request vessel list on connection
-            console.log('Requesting vessel list');
+            // Request vessel list and calibration settings on connection
+            console.log('Requesting initial data');
             try {
                 ws.send(JSON.stringify({ command: 'getVessels' }));
+                ws.send(JSON.stringify({ command: 'getCalibrationSettings' }));
             } catch (e) {
-                console.error('Failed to request vessel list:', e);
-                statusDisplay.textContent = 'Failed to load vessels';
+                console.error('Failed to request initial data:', e);
+                statusDisplay.textContent = 'Failed to load data';
                 statusDisplay.style.color = '#e74c3c';
             }
             // Restore updates state if it was enabled
@@ -135,6 +138,11 @@ function connectWebSocket() {
                     ws.send(JSON.stringify({ command: 'getVessels' }));
                 }
             }
+
+            // Handle calibration settings
+            if (data.calibrationMargin !== undefined) {
+                calibrationMarginInput.value = (data.calibrationMargin * 100).toFixed(1);
+            }
         } catch (e) {
             console.error('Error parsing message:', e);
         }
@@ -176,7 +184,7 @@ function updateVesselsList(vessels) {
         vesselElement.innerHTML = `
             <div class="vessel-info">
                 <h3>${vessel.name}</h3>
-                <p>Vessel: ${vessel.vesselWeight}g | Spool: ${vessel.spoolWeight}g</p>
+                <p>Vessel: ${vessel.vesselWeight.toFixed(1)}g | Spool: ${vessel.spoolWeight.toFixed(1)}g</p>
             </div>
             <div class="vessel-actions">
                 <button onclick="selectVessel(${index})" class="button">Select</button>
@@ -253,6 +261,21 @@ function deleteVessel(index) {
     }
 }
 
+// Calibration margin handling
+saveMarginButton.addEventListener('click', () => {
+    const marginPercent = parseFloat(calibrationMarginInput.value);
+    if (marginPercent >= 0.1 && marginPercent <= 10) {
+        const margin = marginPercent / 100;
+        ws.send(JSON.stringify({
+            command: 'setCalibrationMargin',
+            margin: margin
+        }));
+    } else {
+        statusDisplay.textContent = 'Invalid margin (must be between 0.1% and 10%)';
+        statusDisplay.style.color = '#e74c3c';
+    }
+});
+
 // Event Listeners
 tareButton.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -282,8 +305,8 @@ vesselForm.addEventListener('submit', (event) => {
     event.preventDefault();
     const index = document.getElementById('vessel-index').value;
     const name = document.getElementById('vessel-name').value;
-    const vesselWeight = parseFloat(document.getElementById('vessel-weight').value);
-    const spoolWeight = parseFloat(document.getElementById('spool-weight').value);
+    const vesselWeight = Math.round(parseFloat(document.getElementById('vessel-weight').value) * 10) / 10;
+    const spoolWeight = Math.round(parseFloat(document.getElementById('spool-weight').value) * 10) / 10;
 
     const data = {
         command: index ? 'updateVessel' : 'addVessel',
